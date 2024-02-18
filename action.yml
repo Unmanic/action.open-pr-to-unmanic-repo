@@ -1,5 +1,5 @@
-name: 'Open PR to Official Unmanic Repository'
-description: 'Generates a PR to the official Unmanic repository from a Git Repository containing a Unmanic Plugin'
+name: 'Open PR to an Unmanic Repository'
+description: 'Generates a PR to an Unmanic repository from a Git Repository containing a Unmanic Plugin source'
 inputs:
   dst_repo:
     description: 'The repository to push to. Should be a fork of the official Unmanic Plugin Repository.'

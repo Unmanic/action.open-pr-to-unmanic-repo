@@ -1,4 +1,4 @@
-# action-open-pr-in-official-unmanic-repo
+# action.open-pr-to-unmanic-repo
 A GitHub action that automatically opens a PR against an Unmanic plugin repository hosted on GitHub.
 
 This action will create a new branch prefixed with `pr-`. The branch will be pushed to the remote repository specified by `dst_repo`.
@@ -35,7 +35,7 @@ All PRs opened by this action will follow a format:
 Generate a PR to the official Unmanic plugin repo
 ```yaml
     - name: Generate PR for official repo
-      uses: Josh5/action-open-pr-in-official-unmanic-repo@master
+      uses: Unmanic/action.open-pr-to-unmanic-repo@master
       with:
         dst_repo: Josh5/unmanic-plugins
         pr_repo: Unmanic/unmanic-plugins
@@ -46,7 +46,7 @@ Generate a PR to the official Unmanic plugin repo
 Generate a PR to my own fork of the Unmanic plugin repo
 ```yaml
     - name: Generate PR for official repo
-      uses: Josh5/action-open-pr-in-official-unmanic-repo@master
+      uses: Unmanic/action.open-pr-to-unmanic-repo@master
       with:
         dst_repo: Josh5/unmanic-plugins
         pr_repo: Josh5/unmanic-plugins
