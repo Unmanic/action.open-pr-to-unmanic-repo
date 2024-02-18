@@ -29,6 +29,7 @@ runs:
       with:
         path: build/repo
         submodules: recursive
+        token: ${{ inputs.github_token }}
 
     # Prepare build environment
     - name: Prepare build environment
