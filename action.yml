@@ -143,22 +143,12 @@ runs:
         pushd "${repo_root_path}" &> /dev/null
         echo "*** Force push PR branch"
         git push origin "pr-${plugin_id}"
+        # Add a small sleep here before completing this step. This allows time for the push to complete.
+        sleep 2
         popd &> /dev/null
 
         # Mark successful
         echo "result=success" >> $GITHUB_OUTPUT
-
-    # # If a PR branch was created, force push branch to dest repo
-    # - name: Push PR branch
-    #   if: steps.execute.outputs.result == 'success'
-    #   shell: bash
-    #   run: |
-    #     git config -l | grep 'http\..*\.extraheader' | cut -d= -f1 | xargs -L1 git config --unset-all
-    #     git push -f https://token:${GH_TOKEN}@github.com/${{ inputs.dst_repo }}.git "pr-${{ steps.prepare.outputs.plugin_id }}"
-    #     # Add a small sleep here before running completing this job
-    #     sleep 2
-    #   env:
-    #     GH_TOKEN: "${{ inputs.github_token }}"
 
     # If a PR branch was created, open a PR (if one is not already open)
     - name: Generate PR
