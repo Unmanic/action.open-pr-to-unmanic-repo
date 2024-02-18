@@ -2,11 +2,14 @@ name: 'Open PR to Official Unmanic Repository'
 description: 'Generates a PR to the official Unmanic repository from a Git Repository containing a Unmanic Plugin'
 inputs:
   dst_repo:
-    description: 'The repository to open the PR against'
+    description: 'The repository to push to. Should be a fork of the official Unmanic Plugin Repository.'
+    required: true
+  pr_repo:
+    description: 'The repository to open the PR against. Can be either a fork or the official Unmanic Plugin Repository.'
     required: false
     default: 'Unmanic/unmanic-plugins'
-  dst_branch_name:
-    description: 'The name of the branch to open the PR against'
+  pr_repo_branch_name:
+    description: 'The name of the branch to open the PR against.'
     required: false
     default: 'official'
   github_token:
@@ -28,7 +31,8 @@ runs:
       uses: actions/checkout@v3
       with:
         path: build/repo
-        submodules: recursive
+        repository: ${{ inputs.dst_repo }}
+        fetch-depth: 0
         token: ${{ inputs.github_token }}
 
     # Prepare build environment
@@ -39,47 +43,57 @@ runs:
         # Read plugin id and version from info.json
         plugin_id=$(cat build/plugin/info.json | jq -r .id)
         plugin_version=$(cat build/plugin/info.json | jq -r .version)
-        echo "plugin_id=${plugin_id}" >> $GITHUB_OUTPUT
-        echo "plugin_version=${plugin_version}" >> $GITHUB_OUTPUT
+        if [[ -z ${plugin_id:-} ]]; then
+            echo "Unable to determine the ID of your plugin. Is it set in the info.json file?"
+            exit 1
+        fi
+        # Configure paths
+        repo_root_path="$(pwd)/build/repo"
+        plugin_location="$(pwd)/build/plugin.${plugin_id:?}"
 
+        ########################################################################
+        ### MOVE PLUGIN BUILD DIRECTORY
         # Rename plugin directory for building
-        rm -rf build/plugin.${plugin_id}
-        mv -fv build/plugin build/plugin.${plugin_id}
+        rm -rf build/plugin.${plugin_id:?}
+        mv -fv build/plugin build/plugin.${plugin_id:?}
+
+        ########################################################################
+        ### EXPORT VARIABLES FOR FOLLOWING STEPS
+        echo "plugin_id=${plugin_id:?}" >> $GITHUB_OUTPUT
+        echo "plugin_version=${plugin_version:?}" >> $GITHUB_OUTPUT
+        echo "repo_root_path=${repo_root_path:?}" >> $GITHUB_OUTPUT
+        echo "plugin_location=${plugin_location:?}" >> $GITHUB_OUTPUT
 
     # Check for plugin updates and create a PR branch with any changes found
     - name: Generate PR branch
       shell: bash
       id: execute
+      env:
+        pr_repo: "${{ inputs.pr_repo }}"
+        pr_repo_branch_name: "${{ inputs.pr_repo_branch_name }}"
+        plugin_id: ${{ steps.prepare.outputs.plugin_id }}
+        plugin_version: ${{ steps.prepare.outputs.plugin_version }}
+        repo_root_path: ${{ steps.prepare.outputs.repo_root_path }}
+        plugin_location: ${{ steps.prepare.outputs.plugin_location }}
       run: |
-        plugin_id="${{ steps.prepare.outputs.plugin_id }}"
-        repo_root_path="$(pwd)/build/repo"
-        plugin_location="$(pwd)/build/plugin.${plugin_id}"
-        dst_repo=${{ inputs.dst_repo }}
-        dst_branch_name=${{ inputs.dst_branch_name }}
-
-        if [[ -z ${plugin_id} ]]; then
-            echo "Unable to determine the ID of your plugin. Is it set in the info.json file?"
-            exit 1
-        fi
-
-
         ########################################################################
         ### CREATE PR BRANCH
-        pushd "${repo_root_path}" &> /dev/null
+        pushd "${repo_root_path:?}" &> /dev/null
         # Create clean PR branch 
-        echo "*** Checkout clean PR branch for plugin"
+        echo "*** Configure git user"
         git config user.name "GitHub Actions"
         git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-        git remote add upstream https://github.com/${dst_repo:?}.git
-        git branch -D "pr-${plugin_id}" 2> /dev/null || true
-        git fetch upstream ${dst_branch_name:?}
-        git checkout -b "pr-${plugin_id}" upstream/${dst_branch_name:?}
+        echo "*** Checkout clean PR branch for plugin"
+        git remote add upstream https://github.com/${pr_repo:?}.git
+        git branch -D "pr-${plugin_id:?}" 2> /dev/null || true
+        git fetch upstream ${pr_repo_branch_name:?}
+        git checkout -b "pr-${plugin_id:?}" upstream/${pr_repo_branch_name:?}
         popd &> /dev/null
 
 
         ########################################################################
         ### UPDATE SUBMODULES
-        pushd "${plugin_location}" &> /dev/null
+        pushd "${plugin_location:?}" &> /dev/null
         # Update any submodules
         echo "*** Pulling plugin submodules"
         git submodule update --init --recursive 
@@ -88,7 +102,7 @@ runs:
 
         ########################################################################
         ### PATCH PROJECT
-        pushd "${plugin_location}" &> /dev/null
+        pushd "${plugin_location:?}" &> /dev/null
         # Apply any patches
         if [[ -d ./patches ]]; then
             echo "*** Patching project"
@@ -99,16 +113,16 @@ runs:
 
         ########################################################################
         ### BUILD/INSTALL SOURCE INTO PR DIR
-        pushd "${repo_root_path}" &> /dev/null
+        pushd "${repo_root_path:?}" &> /dev/null
         # Install/update plugin files
         echo "*** Installing files from plugin git repo to this repository's source directory"
-        mkdir -p "${repo_root_path}/source/${plugin_id}"
-        ls -la "${plugin_location}/"
-        rm -rf "${repo_root_path}/source/${plugin_id}"/*
-        find "${plugin_location}" \( -type d -or -type f \) | grep -vE '(\.git/|\.github/|\.gitmodules|\.idea/)' | while read -r file; do
+        mkdir -p "${repo_root_path:?}/source/${plugin_id:?}"
+        ls -la "${plugin_location:?}/"
+        rm -rf "${repo_root_path:?}/source/${plugin_id:?}"/*
+        find "${plugin_location:?}" \( -type d -or -type f \) | grep -vE '(\.git/|\.github/|\.gitmodules|\.idea/)' | while read -r file; do
             # Construct the relative path
-            relative_path="${file#${plugin_location}/}"
-            dest_path="${repo_root_path}/source/${plugin_id}/${relative_path}"
+            relative_path="${file#${plugin_location:?}/}"
+            dest_path="${repo_root_path:?}/source/${plugin_id:?}/${relative_path}"
             if [ -d "${file}" ]; then
                 mkdir -p "${dest_path}"
             elif [ -f "${file}" ]; then
@@ -116,18 +130,18 @@ runs:
             fi
         done
         # Read plugin version
-        plugin_version=$(cat "${repo_root_path}/source/${plugin_id}/info.json" | jq -rc '.version')
-        [[ ${plugin_version} == "null" ]] && echo "Failed to fetch the plugin's version from the info.json file. Exit!" && exit 1;
+        plugin_version=$(cat "${repo_root_path:?}/source/${plugin_id:?}/info.json" | jq -rc '.version')
+        [[ ${plugin_version:?} == "null" ]] && echo "Failed to fetch the plugin's version from the info.json file. Exit!" && exit 1;
         popd &> /dev/null
 
 
         ########################################################################
         ### COMMIT
-        pushd "${repo_root_path}" &> /dev/null
+        pushd "${repo_root_path:?}" &> /dev/null
         echo "*** Commit changes in unmanic-plugins repository"
-        commit_message="[${plugin_id}] v${plugin_version}"
+        commit_message="[${plugin_id:?}] v${plugin_version:?}"
         echo ${commit_message}
-        git add "source/${plugin_id}"
+        git add "source/${plugin_id:?}"
         git commit -m "${commit_message}"
         if [[ $? -gt 0 ]]; then
             echo
@@ -140,9 +154,9 @@ runs:
 
         ########################################################################
         ### PUSH
-        pushd "${repo_root_path}" &> /dev/null
-        echo "*** Force push PR branch"
-        git push -f origin "pr-${plugin_id}"
+        pushd "${repo_root_path:?}" &> /dev/null
+        echo "*** Force push PR branch to dst_repo"
+        git push -f origin "pr-${plugin_id:?}"
         # Add a small sleep here before completing this step. This allows time for the push to complete.
         sleep 2
         popd &> /dev/null
@@ -150,23 +164,33 @@ runs:
         # Mark successful
         echo "result=success" >> $GITHUB_OUTPUT
 
-    # If a PR branch was created, open a PR (if one is not already open)
+
+    # Prepare build environment
     - name: Generate PR
       if: steps.execute.outputs.result == 'success'
       shell: bash
-      run: |
-        pushd "$(pwd)/build/repo" &> /dev/null
-        echo "*** Create PR from PR branch"
-        # Configure the source workflow link
-        workflow_run_link="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
-        # Execute the 'gh pr create' command and exit quietly without error if the command fails
-        gh pr create \
-          --title "[${{ steps.prepare.outputs.plugin_id }}] v${{ steps.prepare.outputs.plugin_version }}" \
-          --body "PR automatically generated from [plugin source workflow](${workflow_run_link})" \
-          --repo "${{ inputs.dst_repo }}" \
-          --base "${{ inputs.dst_branch_name }}" \
-          --head "pr-${{ steps.prepare.outputs.plugin_id }}" \
-          || true
-        popd &> /dev/null
       env:
         GITHUB_TOKEN: "${{ inputs.github_token }}"
+        dst_repo: "${{ inputs.dst_repo }}"
+        pr_repo: "${{ inputs.pr_repo }}"
+        pr_repo_branch_name: "${{ inputs.pr_repo_branch_name }}"
+        plugin_id: ${{ steps.prepare.outputs.plugin_id }}
+        plugin_version: ${{ steps.prepare.outputs.plugin_version }}
+      run: |
+        pushd "$(pwd)/build/repo" &> /dev/null
+        # Configure the source workflow link
+        echo "*** Build workflow link for PR body"
+        workflow_run_link="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
+        # Fetch user from dst_repo
+        echo "*** Extract Fork GitHub user from ${dst_repo:?}"
+        github_user="${dst_repo%%/*}"
+        # Execute the 'gh pr create' command and exit quietly without error if the command fails
+        echo "*** Create PR from PR branch"
+        gh pr create \
+          --title "[${plugin_id:?}] v${plugin_version:?}" \
+          --body "PR automatically generated from [plugin source workflow](${workflow_run_link:?})" \
+          --repo "${pr_repo:?}" \
+          --base "${pr_repo_branch_name:?}" \
+          --head "${github_user:?}:pr-${plugin_id:?}" \
+          || true
+        popd &> /dev/null
