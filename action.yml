@@ -16,19 +16,18 @@ runs:
   using: 'composite'
   steps:
 
-    # Checkout the destination plugin repo
-    - name: Checkout destination plugin repo
-      uses: actions/checkout@v3
-      with:
-        repository: ${{ inputs.dst_repo }}
-        ref: ${{ inputs.dst_branch_name }}
-        fetch-depth: 0
-
-    # Checkout plugin source
-    - name: Checkout plugin
+    # Checkout plugin source 
+    - name: Checkout plugin source
       uses: actions/checkout@v3
       with:
         path: build/plugin
+        submodules: recursive
+
+    # Checkout plugin source
+    - name: Checkout plugin for PR branch
+      uses: actions/checkout@v3
+      with:
+        path: build/repo
         submodules: recursive
 
     # Prepare build environment
@@ -46,19 +45,16 @@ runs:
         rm -rf build/plugin.${plugin_id}
         mv -fv build/plugin build/plugin.${plugin_id}
 
-    # Configure git user for commit messages
-    - name: Configure git user
-      uses: fregante/setup-git-user@v1
-
     # Check for plugin updates and create a PR branch with any changes found
     - name: Generate PR branch
       shell: bash
       id: execute
       run: |
         plugin_id="${{ steps.prepare.outputs.plugin_id }}"
-        repo_root_path="$(pwd)"
-        plugin_location="${repo_root_path}/build/plugin.${plugin_id}"
-        mkdir -p "${repo_root_path}/build"
+        repo_root_path="$(pwd)/build/repo"
+        plugin_location="$(pwd)/build/plugin.${plugin_id}"
+        dst_repo=${{ inputs.dst_repo }}
+        dst_branch_name=${{ inputs.dst_branch_name }}
 
         if [[ -z ${plugin_id} ]]; then
             echo "Unable to determine the ID of your plugin. Is it set in the info.json file?"
@@ -70,9 +66,13 @@ runs:
         ### CREATE PR BRANCH
         pushd "${repo_root_path}" &> /dev/null
         # Create clean PR branch 
-        echo -e "\n*** Checkout clean PR branch for plugin"
-        git branch -D "pr-${plugin_id}" 2> /dev/null
-        git checkout -b "pr-${plugin_id}"
+        echo "*** Checkout clean PR branch for plugin"
+        git config user.name "GitHub Actions"
+        git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+        git remote add upstream https://github.com/${dst_repo:?}.git
+        git branch -D "pr-${plugin_id}" 2> /dev/null || true
+        git fetch upstream ${dst_branch_name:?}
+        git checkout -b "pr-${plugin_id}" upstream/${dst_branch_name:?}
         popd &> /dev/null
 
 
@@ -80,7 +80,7 @@ runs:
         ### UPDATE SUBMODULES
         pushd "${plugin_location}" &> /dev/null
         # Update any submodules
-        echo -e "\n*** Pulling plugin submodules"
+        echo "*** Pulling plugin submodules"
         git submodule update --init --recursive 
         popd &> /dev/null
 
@@ -90,7 +90,7 @@ runs:
         pushd "${plugin_location}" &> /dev/null
         # Apply any patches
         if [[ -d ./patches ]]; then
-            echo -e "\n*** Patching project"
+            echo "*** Patching project"
             find ./patches -type f -name "*.patch" -exec patch -p1 --input="{}" --forward --verbose \;
         fi
         popd &> /dev/null
@@ -100,7 +100,7 @@ runs:
         ### BUILD/INSTALL SOURCE INTO PR DIR
         pushd "${repo_root_path}" &> /dev/null
         # Install/update plugin files
-        echo -e "\n*** Installing files from plugin git repo to this repository's source directory"
+        echo "*** Installing files from plugin git repo to this repository's source directory"
         mkdir -p "${repo_root_path}/source/${plugin_id}"
         ls -la "${plugin_location}/"
         rm -rf "${repo_root_path}/source/${plugin_id}"/*
@@ -122,9 +122,8 @@ runs:
 
         ########################################################################
         ### COMMIT
-        result='failed'
         pushd "${repo_root_path}" &> /dev/null
-        echo -e "\n*** Commit changes in unmanic-plugins repository"
+        echo "*** Commit changes in unmanic-plugins repository"
         commit_message="[${plugin_id}] v${plugin_version}"
         echo ${commit_message}
         git add "source/${plugin_id}"
@@ -137,26 +136,36 @@ runs:
         fi
         popd &> /dev/null
 
+
+        ########################################################################
+        ### PUSH
+        pushd "${repo_root_path}" &> /dev/null
+        echo "*** Force push PR branch"
+        git push origin "pr-${plugin_id}"
+        popd &> /dev/null
+
         # Mark successful
         echo "result=success" >> $GITHUB_OUTPUT
 
-    # If a PR branch was created, force push branch to dest repo
-    - name: Push PR branch
-      if: steps.execute.outputs.result == 'success'
-      shell: bash
-      run: |
-        git config -l | grep 'http\..*\.extraheader' | cut -d= -f1 | xargs -L1 git config --unset-all
-        git push -f https://token:${GH_TOKEN}@github.com/${{ inputs.dst_repo }}.git "pr-${{ steps.prepare.outputs.plugin_id }}"
-        # Add a small sleep here before running completing this job
-        sleep 2
-      env:
-        GH_TOKEN: "${{ inputs.github_token }}"
+    # # If a PR branch was created, force push branch to dest repo
+    # - name: Push PR branch
+    #   if: steps.execute.outputs.result == 'success'
+    #   shell: bash
+    #   run: |
+    #     git config -l | grep 'http\..*\.extraheader' | cut -d= -f1 | xargs -L1 git config --unset-all
+    #     git push -f https://token:${GH_TOKEN}@github.com/${{ inputs.dst_repo }}.git "pr-${{ steps.prepare.outputs.plugin_id }}"
+    #     # Add a small sleep here before running completing this job
+    #     sleep 2
+    #   env:
+    #     GH_TOKEN: "${{ inputs.github_token }}"
 
     # If a PR branch was created, open a PR (if one is not already open)
     - name: Generate PR
       if: steps.execute.outputs.result == 'success'
       shell: bash
       run: |
+        pushd "$(pwd)/build/repo" &> /dev/null
+        echo "*** Create PR from PR branch"
         # Configure the source workflow link
         workflow_run_link="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
         # Execute the 'gh pr create' command and exit quietly without error if the command fails
@@ -166,5 +175,6 @@ runs:
           --base "${{ inputs.dst_branch_name }}" \
           --head "pr-${{ steps.prepare.outputs.plugin_id }}" \
           --repo "${{ inputs.dst_repo }}" || true
+        popd &> /dev/null
       env:
         GITHUB_TOKEN: "${{ inputs.github_token }}"
