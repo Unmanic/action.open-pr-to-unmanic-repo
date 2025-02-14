@@ -28,7 +28,12 @@ All PRs opened by this action will follow a format:
 **Required** - A personal access token (PAT) used to push the PR branch and open the PR against the `pr_repo`.
 
 > [!IMPORTANT]
-> This PAT requires the `workflow` scope. For this reason we cannot use the automatically provided `github.token` in this task.
+> It is not possible to create a PR using the automatically provided `github.token` in this task.
+> 
+> Create a PAT with these permissions:
+> - Metadata: RO
+> - Contents: RW
+> - Pull requests: RW
 
 ## Example usages
 
